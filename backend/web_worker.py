@@ -113,7 +113,7 @@ class OAuthHandler(tornado.web.RequestHandler):
             access_token = response.body.decode("utf-8").split("&")[0][13:]
 
             if access_token:
-                self.set_secure_cookie("access_token", access_token, expires=86400)
+                self.set_secure_cookie("access_token", access_token, expires=time.time() + 86400)
                 self.redirect("/")
                 return
 
