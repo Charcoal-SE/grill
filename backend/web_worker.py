@@ -1,6 +1,7 @@
 import functools
 import json
 import os
+import time
 import tornado.escape
 import tornado.gen
 import tornado.httpclient
@@ -17,7 +18,7 @@ _oauth_route = None
 
 @functools.lru_cache(maxsize=128)
 @tornado.gen.coroutine
-def _fetch_user(token):
+def _fetch_user(token, _):
     token = token.decode("utf-8")
 
     http_client = tornado.httpclient.AsyncHTTPClient()
@@ -39,7 +40,11 @@ class FetchUser(tornado.web.RequestHandler):
         token = self.get_secure_cookie("access_token")
 
         if token:
-            self.current_user = yield _fetch_user(token)
+            self.current_user = yield _fetch_user(token, time.time() // 5400)
+
+            if not self.current_user or self.current_user["reputation"] < 20:
+                self.set_status(200)
+                self.finish("<html><body>Sorry, you need at least 20 reputation to chat.</body></html>")
 
 
 class GrillWS(tornado.websocket.WebSocketHandler):
@@ -53,20 +58,25 @@ class GrillWS(tornado.websocket.WebSocketHandler):
 
     @tornado.gen.coroutine
     def open(self):
-        self.__class__._sockets.add(self)
-
         token = self.get_secure_cookie("access_token")
 
-        if token:
-            user = yield _fetch_user(token)
-
-            if user["account_id"] in config.devs:
-                self._dev = True
-                self._name = user["display_name"]
-
-                self.__class__._dev_sockets.add(self)
-        else:
+        if not token:
             self.close()
+            return
+
+        user = yield _fetch_user(token, time.time() // 5400)
+
+        if not user or user["reputation"] < 20:
+            self.close()
+            return
+
+        self.__class__._sockets.add(self)
+
+        if user["account_id"] in config.devs:
+            self._dev = True
+            self._name = user["display_name"]
+
+            self.__class__._dev_sockets.add(self)
 
     def on_message(self, message):
         if self._dev:
@@ -100,11 +110,14 @@ class OAuthHandler(tornado.web.RequestHandler):
             request = tornado.httpclient.HTTPRequest("https://stackexchange.com/oauth/access_token", method="POST", body=body)
 
             response = yield tornado.gen.Task(http_client.fetch, request)
+            access_token = response.body.decode("utf-8").split("&")[0][13:]
 
-            self.set_secure_cookie("access_token", response.body.decode("utf-8").split("&")[0][13:])
-            self.redirect("/")
-        else:
-            self.set_status(400)
+            if access_token:
+                self.set_secure_cookie("access_token", access_token, expires=86400)
+                self.redirect("/")
+                return
+
+        self.set_status(400)
 
 
 class EnqueueHandler(FetchUser):
@@ -154,7 +167,7 @@ class WrapUpHandler(FetchUser):
 
 class HomeHandler(FetchUser):
     def get(self):
-        self.set_header("cache-control", "no-cache")
+        self.set_header("cache-control", "no-store,no-cache,must-revalidate,max-age=0")
 
         if not self.current_user:
             self.redirect(_oauth_route)
@@ -175,8 +188,8 @@ def start():
                     .format(config.client_id, config.redirect_uri)
 
     application = tornado.web.Application([
-            (r"/ws", GrillWS),
             (r"/", HomeHandler),
+            (r"/ws", GrillWS),
             (r"/oauth_redirect", OAuthHandler),
             (r"/enqueue", EnqueueHandler),
             (r"/skip", SkipStateHandler),
