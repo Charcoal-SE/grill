@@ -25,4 +25,4 @@ task "run", ->
   invoke "build"
   child_process = require "child_process"
 
-  child_process.spawn "pypy3", ["main.py"], stdio: 'inherit'
+  child_process.spawn "pypy3", ["main.py"], stdio: "inherit"
