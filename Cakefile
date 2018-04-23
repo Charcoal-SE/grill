@@ -1,7 +1,6 @@
 task "build", ->
   fs = require "fs"
   glob = require "glob"
-  path = require "path"
 
   fs.copyFile "node_modules/jquery/dist/jquery.min.js", "frontend/jquery.js", (err) -> throw err if err
   fs.copyFile "node_modules/bootstrap/dist/css/bootstrap.min.css", "frontend/bootstrap.css", (err) -> throw err if err
